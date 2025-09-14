@@ -1,0 +1,258 @@
+<!DOCTYPE html><html lang="fr"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>COFIN-CO-M — Version Totale</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root{
+  --bg:#F3F4F6; --panel:#FFFFFF; --line:#D1D5DB;
+  --accent:#006F3B; --accent-light:#34D399; --accent-gold:#FBBF24; --text:#111827;
+}
+body{font-family:system-ui,Roboto,Arial;background:var(--bg);color:var(--text)}
+header{display:flex;gap:.8rem;align-items:center;background:var(--accent);color:white;padding:.6rem 1rem}
+header b{color:var(--accent-gold)}
+.layout{display:grid;grid-template-columns:280px 1fr}
+nav{background:var(--panel);min-height:calc(100vh - 56px);border-right:1px solid var(--line);overflow:auto}
+nav button{display:block;width:100%;text-align:left;padding:.65rem 1rem}
+nav button.active{background:var(--accent-light);color:#fff;font-weight:700}
+main{padding:1rem}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:.6rem;padding:1rem;margin-bottom:1rem}
+.btn{background:var(--accent);color:#fff;padding:.45rem .9rem;border-radius:.45rem;font-weight:700}
+.btn.secondary{background:var(--accent-gold);color:black}
+table{width:100%;border-collapse:collapse} th,td{border-bottom:1px solid var(--line);padding:.5rem;text-align:left}
+.badge{display:inline-block;background:var(--accent-light);color:white;padding:.2rem .5rem;border-radius:.4rem;margin:.15rem 0}
+.input,select{background:#ffffff;border:1px solid var(--line);border-radius:.45rem;padding:.45rem}
+</style>
+</head><body>
+<header><img src="assets/logo.svg" width="90"><b>COFIN-CO-M</b><span class="badge">Version Totale</span></header>
+<div class="layout">
+  <nav id="nav"></nav>
+  <main id="main"><div class="card">Bienvenue. Connectez-vous et utilisez les modules complets.</div></main>
+</div>
+<script>
+const API = location.origin + "/api";
+let CURRENT_USER = null;
+const MODULES=[
+  {id:"login",label:"Connexion",render:()=>renderLogin()},
+  {id:"cash",label:"Caisse (OTP)",render:()=>renderCash()},
+  {id:"field",label:"Agent terrain (OTP)",render:()=>renderField()},
+  {id:"accounts",label:"Ouverture de comptes",render:()=>renderAccounts()},
+  {id:"acct",label:"Comptabilité",render:()=>renderAccounting()},
+  {id:"audit",label:"Audit",render:()=>renderAudit()},
+  {id:"settings",label:"Paramètres (OTP/SMS)",render:()=>renderSettings()}
+];
+function renderNav(active){
+  document.getElementById('nav').innerHTML = MODULES.map(m=>`<button class="${active===m.id?'active':''}" onclick="openMod('${m.id}')">${m.label}</button>`).join("");
+}
+function openMod(id){ renderNav(id); const m=MODULES.find(x=>x.id===id); m&&m.render(); }
+function setMain(html){ document.getElementById('main').innerHTML=html; }
+function msgOk(t){ return `<div class="badge">${t}</div>` }
+function err(e){ alert(e?.error||e?.message||"Erreur"); }
+
+async function api(path, method="GET", body=null){
+  const opts = { method, headers:{'Content-Type':'application/json'} };
+  if(body) opts.body = JSON.stringify(body);
+  const r = await fetch(API+path, opts);
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw j;
+  return j;
+}
+
+// Connexion (mock par username)
+function renderLogin(){
+  setMain(`<div class="card">
+    <h2>Connexion</h2>
+    <label>Nom d'utilisateur <input id="u" class="input" placeholder="superadmin / chefA / caisse1 / terrain1"></label>
+    <button class="btn mt-2" onclick="doLogin()">Se connecter</button>
+    <div id="ls" class="mt-2"></div>
+  </div>`);
+}
+async function doLogin(){
+  try{
+    const user = document.getElementById('u').value.trim();
+    const r = await api('/auth/login','POST',{username:user});
+    CURRENT_USER = r.user;
+    document.getElementById('ls').innerHTML = msgOk(`Connecté en tant que ${CURRENT_USER.username} (${CURRENT_USER.role})`);
+  }catch(e){ err(e); }
+}
+
+// Caisse
+function renderCash(){
+  setMain(`<div class="card"><h2>Caisse — Retrait / Dépôt</h2>
+    <label>Type <select id="ct" class="input"><option>Retrait caisse</option><option>Dépôt caisse</option></select></label>
+    <label>Montant <input id="cm" type="number" class="input" value="10000"></label>
+    <label>Téléphone client <input id="cp" class="input" placeholder="06..."></label>
+    <button class="btn mt-2" onclick="cashSend()">Envoyer OTP</button>
+    <div id="cs" class="mt-2"></div>
+  </div>`);
+}
+async function cashSend(){
+  try{
+    const phone=document.getElementById('cp').value;
+    const { txnId, codeDemo } = await api('/otp/send','POST',{ phone, purpose:'cash' });
+    document.getElementById('cs').dataset.txn = txnId;
+    const code = prompt(`(DEMO) Saisir le code reçu par le client (affiché ici): ${codeDemo}`) || "";
+    await api('/otp/verify','POST',{ txnId, code });
+    const type=document.getElementById('ct').value; const montant=+document.getElementById('cm').value||0;
+    const op = await api('/operations','POST',{ agence:'A', type, produit:'Epargne', montant, acteur: (CURRENT_USER?.username||'caisse'), client: phone });
+    document.getElementById('cs').innerHTML = msgOk('Opération validée et comptabilisée.');
+  }catch(e){ err(e); }
+}
+
+// Agent terrain
+function renderField(){
+  setMain(`<div class="card"><h2>Agent terrain — Encaissement</h2>
+    <label>Produit <select id="fp" class="input"><option>Tontine</option><option>Épargne</option><option>Crédit</option></select></label>
+    <label>Montant <input id="fm" type="number" class="input" value="5000"></label>
+    <label>Téléphone client <input id="fph" class="input" placeholder="05..."></label>
+    <button class="btn mt-2" onclick="fieldSend()">Envoyer OTP</button>
+    <div id="fs" class="mt-2"></div>
+  </div>`);
+}
+async function fieldSend(){
+  try{
+    const phone=document.getElementById('fph').value;
+    const { txnId, codeDemo } = await api('/otp/send','POST',{ phone, purpose:'field' });
+    const code = prompt(`(DEMO) Saisir le code reçu (affiché ici): ${codeDemo}`) || "";
+    await api('/otp/verify','POST',{ txnId, code });
+    const prod=document.getElementById('fp').value; const montant=+document.getElementById('fm').value||0;
+    const type = prod==='Crédit' ? 'Recouvrement crédit' : (prod==='Tontine' ? 'Contribution tontine' : 'Dépôt caisse');
+    await api('/operations','POST',{ agence:'B', type, produit: (prod==='Épargne'?'Epargne':prod), montant, acteur:(CURRENT_USER?.username||'terrain'), client: phone });
+    document.getElementById('fs').innerHTML = msgOk('Encaissement validé et comptabilisé.');
+  }catch(e){ err(e); }
+}
+
+// Ouverture de comptes
+function renderAccounts(){
+  setMain(`<div class="card"><h2>Ouverture de compte</h2>
+    <details open><summary class="mb-2">Nouvelle demande</summary>
+      <label>Nom <input id="an" class="input"></label>
+      <label>Téléphone <input id="ap" class="input" placeholder="06..."></label>
+      <label>Type <select id="atp" class="input"><option>Courant</option><option>Épargne</option><option>Bloqué</option></select></label>
+      <button class="btn mt-2" onclick="acctCreate()">Soumettre</button>
+    </details>
+    <div class="grid grid-cols-2 gap-3 mt-3">
+      <div><h3>En attente</h3><div id="pend"></div></div>
+      <div><h3>Actifs</h3><div id="act"></div></div>
+    </div>
+  </div>`);
+  loadAccounts();
+}
+async function loadAccounts(){
+  const all = await api('/accounts');
+  document.getElementById('pend').innerHTML = renderTab(all.pending,true);
+  document.getElementById('act').innerHTML = renderTab(all.active,false);
+}
+function renderTab(list, pending){
+  const rows = (list||[]).map(a=>`
+    <tr><td>${a.nom}</td><td>${a.tel}</td><td>${a.type}</td>${pending?`<td>
+      <button class="btn" onclick="acctApprove('${a.id}','${a.tel}')">Valider</button>
+      <button class="btn secondary" onclick="acctReject('${a.id}')">Rejeter</button>
+    </td>`:"<td class='badge'>Ouvert</td>"}</tr>`).join("");
+  return `<table><thead><tr><th>Nom</th><th>Téléphone</th><th>Type</th><th>Action</th></tr></thead><tbody>${rows||'<tr><td colspan=4>—</td></tr>'}</tbody></table>`;
+}
+async function acctCreate(){
+  try{
+    const nom=document.getElementById('an').value.trim(); const tel=document.getElementById('ap').value.trim(); const type=document.getElementById('atp').value;
+    await api('/accounts','POST',{ nom, tel, type, createdBy: (CURRENT_USER?.username||'agent') });
+    await loadAccounts();
+    alert('Demande envoyée.');
+  }catch(e){ err(e); }
+}
+async function acctApprove(id,tel){
+  try{
+    await api(`/accounts/${id}/approve`,'POST',{ approvedBy:(CURRENT_USER?.username||'chef') });
+    const { txnId, codeDemo } = await api('/otp/send','POST',{ phone: tel, purpose:'open' });
+    const code = prompt(`(DEMO) Saisir le code reçu (affiché ici): ${codeDemo}`) || "";
+    await api('/otp/verify','POST',{ txnId, code });
+    await api(`/accounts/${id}/confirm`,'POST',{ otpTxnId: txnId, code, confirmedBy:(CURRENT_USER?.username||'chef') });
+    await loadAccounts();
+    alert('Compte validé et ouvert.');
+  }catch(e){ err(e); }
+}
+async function acctReject(id){
+  try{ await api(`/accounts/${id}/reject`,'POST',{ rejectedBy:(CURRENT_USER?.username||'chef') }); await loadAccounts(); alert('Demande rejetée.'); }catch(e){ err(e); }
+}
+
+// Comptabilité
+function renderAccounting(){
+  setMain(`<div class="card"><h2>Comptabilité</h2>
+    <button class="btn" onclick="showJournal()">Journal</button>
+    <button class="btn secondary" onclick="showBalance()">Balance</button>
+    <div id="acct_out" class="mt-2"></div>
+  </div>`);
+}
+async function showJournal(){
+  const rows = await api('/accounting/journal');
+  const body = rows.map(j=>`<tr><td>${j.date}</td><td>${j.agence}</td><td>${j.compte}</td><td>${j.libelle}</td><td>${j.debit||0}</td><td>${j.credit||0}</td></tr>`).join("");
+  document.getElementById('acct_out').innerHTML = `<table><thead><tr><th>Date</th><th>Agence</th><th>Compte</th><th>Libellé</th><th>Débit</th><th>Crédit</th></tr></thead><tbody>${body||'<tr><td colspan=6>—</td></tr>'}</tbody></table>`;
+}
+async function showBalance(){
+  const rows = await api('/accounting/balance');
+  const body = rows.map(r=>`<tr><td>${r.compte}</td><td>${r.debit}</td><td>${r.credit}</td><td>${r.solde}</td></tr>`).join("");
+  document.getElementById('acct_out').innerHTML = `<table><thead><tr><th>Compte</th><th>Débit</th><th>Crédit</th><th>Solde</th></tr></thead><tbody>${body||'<tr><td colspan=4>—</td></tr>'}</tbody></table>`;
+}
+
+// Audit
+async function renderAudit(){
+  const rows = await api('/audit');
+  const body = rows.map(a=>`<tr><td>${a.at}</td><td>${a.user}</td><td>${a.action}</td><td><pre>${JSON.stringify(a.details||{})}</pre></td></tr>`).join("");
+  setMain(`<div class="card"><h2>Audit</h2>
+    <table><thead><tr><th>Date</th><th>Utilisateur</th><th>Action</th><th>Détails</th></tr></thead><tbody>${body||'<tr><td colspan=4>—</td></tr>'}</tbody></table>
+  </div>`);
+}
+
+// Settings
+async function renderSettings(){
+  const s = await api('/settings');
+  setMain(`<div class="card"><h2>Paramètres</h2>
+    <h3 class="mt-2">OTP</h3>
+    <label>Longueur <input id="ol" type="number" class="input" value="${s.otp.length}"></label>
+    <label>TTL (sec) <input id="ot" type="number" class="input" value="${s.otp.ttl}"></label>
+    <label>Indicatif (pays) <input id="occ" class="input" value="${s.otp.cc}"></label>
+    <label><input id="o1" type="checkbox" ${s.otp.enable_open?'checked':''}> Ouverture</label>
+    <label><input id="o2" type="checkbox" ${s.otp.enable_cash?'checked':''}> Caisse</label>
+    <label><input id="o3" type="checkbox" ${s.otp.enable_field?'checked':''}> Agent terrain</label>
+    <button class="btn mt-2" onclick="saveOtp()">Enregistrer OTP</button>
+    <h3 class="mt-4">SMS</h3>
+    <label>Provider <input id="sp" class="input" value="${s.sms.provider}"></label>
+    <label>Sender <input id="ss" class="input" value="${s.sms.sender}"></label>
+    <label>API Key <input id="sk" class="input" value="${s.sms.apiKey}" placeholder="••••"></label>
+    <label>Template <input id="st" class="input" value="${s.sms.template}"></label>
+    <button class="btn mt-2" onclick="saveSms()">Enregistrer SMS</button>
+  </div>`);
+}
+async function saveOtp(){
+  try{
+    const body = {
+      length:+document.getElementById('ol').value||6,
+      ttl:+document.getElementById('ot').value||180,
+      cc:document.getElementById('occ').value||"+242",
+      enable_open: document.getElementById('o1').checked,
+      enable_cash: document.getElementById('o2').checked,
+      enable_field: document.getElementById('o3').checked
+    };
+    await api('/settings/otp','PUT',body);
+    alert('OTP mis à jour.');
+  }catch(e){ err(e); }
+}
+async function saveSms(){
+  try{
+    const body = {
+      provider: document.getElementById('sp').value,
+      sender: document.getElementById('ss').value,
+      apiKey: document.getElementById('sk').value,
+      template: document.getElementById('st').value
+    };
+    await api('/settings/sms','PUT',body);
+    alert('SMS mis à jour.');
+  }catch(e){ err(e); }
+}
+
+// Init
+function init(){
+  document.getElementById('nav').innerHTML = MODULES.map(m=>`<button onclick="openMod('${m.id}')">${m.label}</button>`).join("");
+  openMod('login');
+}
+init();
+</script>
+</body></html>

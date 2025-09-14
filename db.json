@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "last_update": "2025-09-13T21:10:00Z"
+  },
+  "users": [
+    {
+      "id": "u1",
+      "username": "superadmin",
+      "role": "Super Admin"
+    },
+    {
+      "id": "u2",
+      "username": "chefA",
+      "role": "ChefAgence"
+    },
+    {
+      "id": "u3",
+      "username": "caisse1",
+      "role": "Caissier"
+    },
+    {
+      "id": "u4",
+      "username": "terrain1",
+      "role": "AgentTerrain"
+    }
+  ],
+  "settings": {
+    "sms": {
+      "provider": "Twilio",
+      "sender": "COFIN",
+      "apiKey": "",
+      "template": "[COFIN] Code: {{code}} pour {{purpose}}"
+    },
+    "otp": {
+      "length": 6,
+      "ttl": 180,
+      "enable_open": true,
+      "enable_cash": true,
+      "enable_field": true,
+      "cc": "+242"
+    }
+  },
+  "accounts": {
+    "pending": [],
+    "active": []
+  },
+  "operations": [],
+  "journal": [],
+  "otps": {},
+  "audit": []
+}
